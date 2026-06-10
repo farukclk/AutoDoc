@@ -68,23 +68,33 @@ class AIDocsService:
             message = body.decode('utf-8')
             print(f" [x] Received request from '{self.input_queue}'")
             
-            # Metehan'ın servisi RabbitMQ'ya JSON atıyor, bunu parse etmeliyiz.
             data_dict = json.loads(message)
             repo_full_name = data_dict.get("repoFullName", "")
-            file_path = data_dict.get("filePath", "")
-            raw_content = data_dict.get("content", "")
+            changes = data_dict.get("changes", [])
             
-            prompt = f"Aşağıdaki {file_path} dosyasının kodunu analiz et ve autodoc.md için sadece Markdown formatında teknik dokümantasyon/API referansı çıkar:\n\n{raw_content}"
+            if not changes:
+                print(" [!] No changes found in message.")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            # Prepare prompt with all diffs
+            diff_text = ""
+            for change in changes:
+                filename = change.get("filename", "Unknown")
+                patch = change.get("patch", "")
+                diff_text += f"\n--- {filename} ---\n{patch}\n"
+            
+            prompt = f"Aşağıdaki değişiklik (diff/patch) kayıtlarını incele ve projenin autodoc.md dokümantasyonunu bu değişikliklere göre nasıl güncellememiz gerektiğini Markdown formatında yaz:\n{diff_text}"
 
             # Call Gemini API
             print(" [x] Processing with Gemini API...")
             gemini_response = self.get_gemini_response(prompt)
             
-            # Post the response to the specified API (Metehan's PR service)
+            # Post the response to the specified API
             print(f" [x] Sending Gemini response to {self.api_endpoint}...")
             payload = {
                 "repoFullName": repo_full_name,
-                "markdownContent": f"### Updated: {file_path}\n\n{gemini_response}"
+                "markdownContent": gemini_response
             }
             self.send_to_api(payload)
             

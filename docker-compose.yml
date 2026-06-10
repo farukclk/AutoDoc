@@ -47,6 +47,7 @@ services:
     container_name: code_parsing_service
     environment:
       - RABBITMQ_HOST=rabbitmq
+      - PYTHONUNBUFFERED=1
     command: python code_parsing_service.py
     depends_on:
       - rabbitmq
@@ -60,6 +61,7 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - API_ENDPOINT=http://pr_service:3001/publish
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PYTHONUNBUFFERED=1
     command: python ai_docs_service.py
     depends_on:
       - rabbitmq
