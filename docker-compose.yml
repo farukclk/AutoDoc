@@ -13,5 +13,32 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  webhook_service:
+    build: 
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: webhook_service
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      # Use the container name 'rabbitmq' instead of localhost
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    command: npm run start --workspace=webhook_service
+    depends_on:
+      - rabbitmq
+
+  pr_service:
+    build: 
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: pr_service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - GITHUB_TOKEN=${GITHUB_TOKEN} # This will be passed from your local .env file or terminal
+    command: npm run start --workspace=pr_service
+
 volumes:
   rabbitmq_data:

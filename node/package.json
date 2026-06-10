@@ -1,0 +1,15 @@
+{
+  "name": "autodoc-node-services",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "webhook_service",
+    "pr_service"
+  ],
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "amqplib": "^2.0.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}
