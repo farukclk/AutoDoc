@@ -18,8 +18,20 @@ class AIDocsService:
         self.channel = None
 
     def setup_rabbitmq(self):
-        # Connect to RabbitMQ
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+        import time
+        # Connect to RabbitMQ with retry
+        retries = 10
+        while retries > 0:
+            try:
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+                break
+            except pika.exceptions.AMQPConnectionError:
+                print(f" [!] RabbitMQ not ready, retrying in 5 seconds... ({retries} retries left)")
+                time.sleep(5)
+                retries -= 1
+        if not self.connection:
+            raise Exception("Could not connect to RabbitMQ")
+            
         self.channel = self.connection.channel()
 
         # Declare the input queue (durable=True survives RabbitMQ restarts)
@@ -32,7 +44,7 @@ class AIDocsService:
         """Calls Gemini API to generate content based on the prompt."""
         try:
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash',
                 contents=prompt
             )
             return response.text
@@ -40,29 +52,41 @@ class AIDocsService:
             print(f"Error calling Gemini API: {e}")
             return f"Error: {str(e)}"
 
-    def send_to_api(self, data):
+    def send_to_api(self, payload):
         """Gelen veriyi belirtilen endpoint'e POST eder."""
         try:
             headers = {'Content-Type': 'application/json'}
-            payload = {"data": data}
             response = requests.post(self.api_endpoint, json=payload, headers=headers)
             print(f" [x] API POST Request Status Code: {response.status_code}")
         except Exception as e:
             print(f" [!] Hata: API'ye POST edilirken bir hata oluştu: {e}")
 
     def callback(self, ch, method, properties, body):
+        import json
         try:
             # Decode the message
             message = body.decode('utf-8')
-            print(f" [x] Received request from '{self.input_queue}': {message}")
+            print(f" [x] Received request from '{self.input_queue}'")
             
+            # Metehan'ın servisi RabbitMQ'ya JSON atıyor, bunu parse etmeliyiz.
+            data_dict = json.loads(message)
+            repo_full_name = data_dict.get("repoFullName", "")
+            file_path = data_dict.get("filePath", "")
+            raw_content = data_dict.get("content", "")
+            
+            prompt = f"Aşağıdaki {file_path} dosyasının kodunu analiz et ve autodoc.md için sadece Markdown formatında teknik dokümantasyon/API referansı çıkar:\n\n{raw_content}"
+
             # Call Gemini API
             print(" [x] Processing with Gemini API...")
-            gemini_response = self.get_gemini_response(message)
+            gemini_response = self.get_gemini_response(prompt)
             
-            # Post the response to the specified API
+            # Post the response to the specified API (Metehan's PR service)
             print(f" [x] Sending Gemini response to {self.api_endpoint}...")
-            self.send_to_api(gemini_response)
+            payload = {
+                "repoFullName": repo_full_name,
+                "markdownContent": f"### Updated: {file_path}\n\n{gemini_response}"
+            }
+            self.send_to_api(payload)
             
             # Acknowledge the message so RabbitMQ knows it's processed
             ch.basic_ack(delivery_tag=method.delivery_tag)
