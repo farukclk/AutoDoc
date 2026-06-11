@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoDoc Presentation | CENG-442</title>
+
+    <!-- Reveal.js CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">
+
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #ec4899;
+            --dark: #0f172a;
+            --glass: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            background: linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e1b4b 100%);
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .reveal {
+            font-family: 'Outfit', sans-serif;
+            color: white;
+        }
+
+        .reveal h1,
+        .reveal h2,
+        .reveal h3,
+        .reveal h4 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            text-transform: none;
+            letter-spacing: -1px;
+            background: linear-gradient(to right, #818cf8, #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 25px;
+        }
+
+        .glass-panel {
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.4);
+        }
+
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+            color: #38bdf8;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 1em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 50px;
+            font-size: 0.7em;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            align-items: center;
+        }
+
+        ul {
+            list-style-type: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        ul li {
+            margin-bottom: 15px;
+            position: relative;
+            padding-left: 35px;
+            font-size: 1em;
+            line-height: 1.4;
+            color: #e2e8f0;
+            text-align: left;
+        }
+
+        ul li::before {
+            content: '✨';
+            position: absolute;
+            left: 0;
+            top: 2px;
+            font-size: 1.3em;
+        }
+
+        /* Special list style for problem slide */
+        .problem-list li::before {
+            content: '';
+            /* Removed stars for problem slide */
+        }
+
+        .problem-list li {
+            padding-left: 0;
+            font-size: 1.2em;
+            margin-bottom: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border-left: 4px solid #f43f5e;
+        }
+
+        .architecture-node {
+            background: rgba(15, 23, 42, 0.8);
+            border: 2px solid var(--primary);
+            padding: 20px;
+            border-radius: 12px;
+            font-size: 0.9em;
+            position: relative;
+            animation: pulse 2s infinite;
+        }
+
+        .architecture-node.python {
+            border-color: #fcd34d;
+            animation-delay: 0.5s;
+        }
+
+        .architecture-node.rabbitmq {
+            border-color: #f97316;
+            animation-delay: 1s;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 15px rgba(99, 102, 241, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+            }
+        }
+
+        /* Particles Background */
+        #particles-js {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: -1;
+        }
+
+        .footer-name {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            font-size: 19px;
+            color: #94a3b8;
+            z-index: 10;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="particles-js"></div>
+    <div class="footer-name">CENG-442 | Mehmet Metehan Çavdar & Faruk Çelik</div>
+
+    <div class="reveal">
+        <div class="slides">
+
+            <!-- Slide 1: Title -->
+            <section>
+                <div class="glass-panel">
+                    <span class="badge">Microservice Architecture</span>
+                    <h1 style="font-size: 3.5em; margin: 10px 0;">AutoDoc</h1>
+                    <h3 style="color: #f8fafc; font-size: 1.4em; font-weight: 300;">AI-Driven Auto-Documentation
+                        Pipeline</h3>
+                    <div style="margin-top: 40px; font-size: 1em; color: #cbd5e1; line-height: 1.5;">
+                        <p><strong>Mehmet Metehan Çavdar</strong> | <strong>Faruk Çelik</strong></p>
+                        <p style="color: #94a3b8;">Asst. Prof. Dr. Huseyin Temucin</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 2: The Problem -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em; margin-bottom: 30px;">The Problem</h2>
+                    <ul class="problem-list">
+                        <li><span
+                                style="font-size: 1.4em; margin-right: 15px; vertical-align: middle;">🧗‍♂️</span><strong>Knowledge
+                                Silos:</strong> Developers write code, but hate writing documentation.</li>
+                        <li><span
+                                style="font-size: 1.4em; margin-right: 15px; vertical-align: middle;">⏳</span><strong>Outdated
+                                Docs:</strong> Code changes rapidly, docs stay the same.</li>
+                        <li><span
+                                style="font-size: 1.4em; margin-right: 15px; vertical-align: middle;">🤯</span><strong>Onboarding
+                                Hell:</strong> New developers spend weeks understanding undocumented spaghetti code.
+                        </li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Slide 3: The Solution -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em;">The AutoDoc Solution</h2>
+                    <p style="font-size: 1em; color: #cbd5e1; margin-bottom: 30px; line-height: 1.4;">An event-driven,
+                        language-agnostic pipeline that automates technical documentation within the CI/CD lifecycle.
+                    </p>
+                    <ul style="font-size: 1em;">
+                        <li><span class="code-font">Push Code</span> to GitHub.</li>
+                        <li>Webhook triggers the pipeline automatically.</li>
+                        <li>AI reads the diffs and updates <span class="code-font">autodoc.md</span>.</li>
+                        <li>Bot opens a <strong>Pull Request</strong> magically.</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Slide 4: Microservice Architecture -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em; margin-bottom: 30px;">4-Tier Architecture</h2>
+                    <div class="grid-2" style="gap: 20px;">
+                        <div class="architecture-node">
+                            <strong style="font-size: 1.2em; display:block; margin-bottom: 10px;">1. Webhook Service
+                                <span style="color:#a3e635">(Node.js)</span></strong>
+                            Listens to GitHub, extracts diffs/tree.
+                        </div>
+                        <div class="architecture-node rabbitmq">
+                            <strong style="font-size: 1.2em; display:block; margin-bottom: 10px;">Message Broker <span
+                                    style="color:#fdba74">(RabbitMQ)</span></strong>
+                            Decouples services, handles async queues.
+                        </div>
+                        <div class="architecture-node python">
+                            <strong style="font-size: 1.2em; display:block; margin-bottom: 10px;">2 & 3. AI Parsing &
+                                Docs <span style="color:#fde047">(Python)</span></strong>
+                            Prepares context & calls Gemini LLM.
+                        </div>
+                        <div class="architecture-node">
+                            <strong style="font-size: 1.2em; display:block; margin-bottom: 10px;">4. PR Service <span
+                                    style="color:#a3e635">(Node.js)</span></strong>
+                            Commits to GitHub & opens PRs.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 5: The "Cold Start" Innovation -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em;">The "Cold Start" Engine</h2>
+                    <span class="badge" style="background: linear-gradient(135deg, #10b981, #3b82f6);">Innovation</span>
+                    <p style="font-size: 1em; text-align: left; margin-top: 20px; color: #f8fafc; line-height: 1.4;">
+                        What happens if <span class="code-font">autodoc.md</span> doesn't exist yet?<br>
+                        <span style="color: #94a3b8; font-size: 0.8em;">Sending a single commit diff to AI yields
+                            terrible results. Our solution:</span>
+                    </p>
+                    <ul style="margin-top: 20px; font-size: 1em;">
+                        <li><strong>Init Mode:</strong> If 404, we fetch the entire Git Tree.</li>
+                        <li><strong>Smart Filtering:</strong> Ignores <span class="code-font">node_modules</span>, <span
+                                class="code-font">.git</span>, etc.</li>
+                        <li><strong>Full Context:</strong> Feeds up to 30 core files to AI to map out the entire project
+                            architecture from scratch.</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Slide 6: Aggressive Fallback Chain -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em;">7-Layer Fallback Chain</h2>
+                    <span class="badge" style="background: linear-gradient(135deg, #f43f5e, #f97316);">Resilience</span>
+                    <p style="font-size: 1em; text-align: left; margin-top: 15px; color: #f8fafc;">
+                        LLM APIs (like Gemini) frequently return <span class="code-font">503 Service Unavailable</span>
+                        due to high demand.
+                    </p>
+                    <div
+                        style="font-size: 1em; text-align: left; background: rgba(0,0,0,0.4); padding: 15px; border-radius: 12px; margin-top: 20px; border-left: 4px solid #a855f7;">
+                        <code
+                            style="color: #c084fc; line-height: 1.5; display: block; font-family: 'JetBrains Mono', monospace;">
+                            1. gemini-3.5-flash (3 retries) <br>
+                            2. gemini-3.0-flash (3 retries) <br>
+                            3. gemini-2.5-flash (3 retries) <br>
+                            4. gemini-3.1-flash-lite (3 retries) <br>
+                            5. gemini-2.5-flash-lite (3 retries) <br>
+                            6. gemma-4-31b (3 retries) <br>
+                            7. gemma-4-26b (3 retries)
+                        </code>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 7: Loop Prevention -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em;">Infinite Loop Prevention</h2>
+                    <p style="font-size: 1em; color: #cbd5e1; margin-bottom: 20px;">
+                        Merging our own <span class="code-font">autodoc.md</span> PR creates a new Push event,
+                        triggering the system again!
+                    </p>
+                    <div
+                        style="background: rgba(15, 23, 42, 0.8); padding: 20px; border-radius: 12px; font-family: 'JetBrains Mono', monospace; font-size: 1em; color: #a3e635; text-align: left; line-height: 1.5;">
+                        <span style="color: #64748b;">// Kendi PR'ımızın merge işlemlerini atlamak için</span><br>
+                        <span style="color: #c084fc;">if</span> (file.filename.<span
+                            style="color: #60a5fa;">toLowerCase</span>() === <span
+                            style="color: #fcd34d;">'autodoc.md'</span>) <span
+                            style="color: #f43f5e;">continue</span>;<br><br>
+                        <span style="color: #c084fc;">if</span> (changedFilesCount === <span
+                            style="color: #f472b6;">0</span> && !isInit) {<br>
+                        &nbsp;&nbsp;<span style="color: #f43f5e;">return</span> res.<span
+                            style="color: #60a5fa;">send</span>(<span style="color: #fcd34d;">'No patches found.
+                            Dropped.'</span>);<br>
+                        }
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 8: Live Demo Time -->
+            <section>
+                <div class="glass-panel" style="text-align: center;">
+                    <h1 style="font-size: 3.8em; margin-bottom: 10px;">Live Demo</h1>
+                    <p style="font-size: 1em; color: #cbd5e1;">May the Demo Gods be with us.</p>
+                    <div style="margin-top: 40px;">
+                        <span class="badge"
+                            style="font-size: 0.8em; animation: pulse 1s infinite; margin-right: 15px;">Terminal Logs
+                            Active</span>
+                        <span class="badge"
+                            style="font-size: 0.8em; animation: pulse 1s infinite; animation-delay: 0.5s;">ngrok Tunnel
+                            Ready</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 9: Future Work (RAG) -->
+            <section>
+                <div class="glass-panel">
+                    <h2 style="font-size: 2em;">Future Work: RAG Integration</h2>
+                    <div class="grid-2" style="gap: 30px;">
+                        <div>
+                            <ul style="font-size: 1.4em;">
+                                <li><strong>Vector Databases:</strong> Using Pinecone/ChromaDB to store code chunk
+                                    embeddings.</li>
+                                <li><strong>Semantic Search:</strong> Only pulling code files mathematically relevant to
+                                    the current commit.</li>
+                                <li><strong>Token Optimization:</strong> Slashing API costs by reducing the context
+                                    window size.</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <div
+                                style="font-size: 6em; filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.5)); animation: float 3s ease-in-out infinite;">
+                                🧠
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 10: Thank You -->
+            <section>
+                <div class="glass-panel" style="text-align: center;">
+                    <h1 style="font-size: 3em;">Thank You!</h1>
+                    <p style="font-size: 1.6em; color: #cbd5e1; margin-top: 20px;">Questions?</p>
+
+                    <div style="margin-top: 40px; font-size: 1em;">
+                        <a href="https://github.com/farukclk/AutoDoc" target="_blank"
+                            style="color: #38bdf8; text-decoration: none; padding: 10px 20px; border-radius: 8px; background: rgba(56, 189, 248, 0.1);">github.com/farukclk/AutoDoc</a>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- Reveal.js Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/particles.js/2.0.0/particles.min.js"></script>
+
+    <script>
+        // Initialize Reveal.js
+        Reveal.initialize({
+            width: 1200,
+            height: 800,
+            hash: true,
+            transition: 'convex', // none/fade/slide/convex/concave/zoom
+            backgroundTransition: 'fade',
+            center: true,
+            controls: true,
+            progress: true,
+            margin: 0.1,
+        });
+
+        // Add float animation for RAG brain
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes float {
+                0% { transform: translateY(0px); }
+                50% { transform: translateY(-15px); }
+                100% { transform: translateY(0px); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize Particles.js for an amazing interactive background
+        particlesJS("particles-js", {
+            "particles": {
+                "number": {
+                    "value": 60,
+                    "density": { "enable": true, "value_area": 800 }
+                },
+                "color": { "value": ["#6366f1", "#ec4899", "#38bdf8"] },
+                "shape": { "type": "circle" },
+                "opacity": {
+                    "value": 0.5,
+                    "random": true,
+                    "anim": { "enable": true, "speed": 1, "opacity_min": 0.1, "sync": false }
+                },
+                "size": {
+                    "value": 4,
+                    "random": true,
+                    "anim": { "enable": true, "speed": 2, "size_min": 0.1, "sync": false }
+                },
+                "line_linked": {
+                    "enable": true,
+                    "distance": 150,
+                    "color": "#ffffff",
+                    "opacity": 0.1,
+                    "width": 1
+                },
+                "move": {
+                    "enable": true,
+                    "speed": 1,
+                    "direction": "none",
+                    "random": true,
+                    "straight": false,
+                    "out_mode": "out",
+                    "bounce": false,
+                    "attract": { "enable": false }
+                }
+            },
+            "interactivity": {
+                "detect_on": "canvas",
+                "events": {
+                    "onhover": { "enable": true, "mode": "grab" },
+                    "onclick": { "enable": true, "mode": "push" },
+                    "resize": true
+                },
+                "modes": {
+                    "grab": { "distance": 200, "line_linked": { "opacity": 0.5 } },
+                    "push": { "particles_nb": 4 }
+                }
+            },
+            "retina_detect": true
+        });
+    </script>
+</body>
+
+</html>
