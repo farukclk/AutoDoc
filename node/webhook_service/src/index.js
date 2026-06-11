@@ -57,6 +57,9 @@ app.post('/webhook', async (req, res) => {
                 
                 if (commitInfo.data.files) {
                     for (const file of commitInfo.data.files) {
+                        // Kendi PR'ımızın merge işlemlerini veya döküman güncellemelerini tekrar işlememek için autodoc.md'yi atlıyoruz
+                        if (file.filename.toLowerCase() === 'autodoc.md') continue;
+                        
                         if (['added', 'modified'].includes(file.status) && file.patch) {
                             filePatches[file.filename] = (filePatches[file.filename] || '') + '\n' + file.patch;
                         }
