@@ -67,16 +67,6 @@ app.post('/webhook', async (req, res) => {
             }
         }
 
-        const changedFilesCount = Object.keys(filePatches).length;
-        if (changedFilesCount === 0) {
-            return res.status(200).send('No files added or modified, or no patches found.');
-        }
-
-        const changesList = Object.entries(filePatches).map(([filename, patch]) => ({
-            filename,
-            patch
-        }));
-
         // Fetch existing autodoc.md
         let existingDoc = '';
         try {
@@ -98,6 +88,19 @@ app.post('/webhook', async (req, res) => {
         let initFiles = [];
         if (!existingDoc) {
             isInit = true;
+        }
+
+        const changedFilesCount = Object.keys(filePatches).length;
+        if (changedFilesCount === 0 && !isInit) {
+            return res.status(200).send('No files added or modified, or no patches found.');
+        }
+
+        const changesList = Object.entries(filePatches).map(([filename, patch]) => ({
+            filename,
+            patch
+        }));
+
+        if (isInit) {
             try {
                 // Fetch the repository tree
                 const treeRes = await octokit.rest.git.getTree({

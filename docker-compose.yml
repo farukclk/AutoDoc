@@ -24,6 +24,7 @@ services:
       - PORT=3000
       # Use the container name 'rabbitmq' instead of localhost
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     command: npm run start --workspace=webhook_service
     depends_on:
       - rabbitmq
