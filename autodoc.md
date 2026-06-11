@@ -1,266 +1,187 @@
-# Proje Teknik Dokümantasyonu (autodoc.md)
+# AutoDoc: Yapay Zekâ Destekli Otomatik Dokümantasyon Boru Hattı
 
-Bu doküman, sistemin amacını, mimari tasarımını, dizin yapısını, veri akışını ve kurulum/dağıtım adımlarını ayrıntılı bir şekilde açıklamaktadır. Yazılım geliştiriciler, sistem yöneticileri ve teknik paydaşlar için bir başvuru kaynağı olarak hazırlanmıştır.
+AutoDoc, yazılım projelerinin kaynak kodlarındaki değişiklikleri veya projenin ilk durumunu analiz ederek otomatik olarak kapsamlı bir `autodoc.md` teknik dokümantasyonu oluşturan ve bunu hedef depoya (repository) bir Çekme İsteği (Pull Request - PR) olarak sunan, olay güdümlü (event-driven) ve mikroservis tabanlı bir sistemdir.
 
----
-
-## 1. Projenin Amacı ve Kapsamı
-
-Bu proje; ölçeklenebilir, test edilebilir ve bakımı kolay bir altyapı sunmak amacıyla modern yazılım geliştirme prensipleri (Clean Architecture, SOLID, DDD - Domain Driven Design) doğrultusunda tasarlanmış bir **Web API ve Veri İşleme Servisi** platformudur.
-
-### Temel Özellikler
-* **Katmanlı Mimari:** İş mantığı (domain) ile dış bağımlılıkların (veritabanı, dış servisler) tamamen birbirinden ayrıştırılması.
-* **Gelişmiş Yetkilendirme ve Güvenlik:** Rol tabanlı erişim kontrolü (RBAC) ve güvenli kimlik doğrulama mekanizmaları.
-* **Asenkron Veri İşleme:** Yoğun iş yüklerini hafifletmek için kuyruk tabanlı arka plan görevleri (Background Jobs).
-* **Esnek Entegrasyon Altyapısı:** Üçüncü parti servislerle kolay entegrasyon için soyutlanmış servis katmanları.
+Sistem; GitHub Webhook tetiklemeleri, mesaj kuyrukları (RabbitMQ), gelişmiş dil modelleri (Gemini API) ve GitHub API entegrasyonlarını bir araya getirerek geliştiricilerin her kod gönderiminde (push) güncel bir dokümantasyona sahip olmasını sağlar.
 
 ---
 
-## 2. Mimari ve Tasarım Desenleri
+## 1. Genel Mimari ve İş Akışı
 
-Proje, bağımlılıkların dışarıdan içeriye doğru aktığı ve merkezde iş kurallarının (domain) yer aldığı **Soğan (Onion) / Temiz (Clean) Mimari** prensiplerine dayanmaktadır.
+Sistem, gevşek bağlı (loosely-coupled) dört ana servis ve bir mesaj kuyruğu katmanından oluşmaktadır:
 
 ```
-      +-----------------------------------------+
-      |        Sunum Katmanı (Presentation)      |
-      |   [REST Controllers / API Endpoints]    |
-      +-------------------+---------------------+
-                          |
-                          v
-      +-------------------+---------------------+
-      |        Uygulama Katmanı (Application)   |
-      |    [DTOs, CQRS Handlers, Use Cases]     |
-      +-------------------+---------------------+
-                          |
-                          v
-      +-------------------+---------------------+
-      |          Çekirdek / Domain Katmanı      |
-      |       [Entities, Value Objects]         |
-      +-----------------------------------------+
-                          ^
-                          | (Arayüz Entegrasyonu)
-      +-------------------+---------------------+
-      |     Altyapı Katmanı (Infrastructure)     |
-      |  [Repositories, DB Context, Third-Party] |
-      +-----------------------------------------+
++------------------+             +-------------------+             +------------------+
+|                  |  Webhook    |                   |  Message    |                  |
+|  GitHub Repo     +------------>+  Webhook Service  +------------>|  RabbitMQ Queue  |
+|                  |  (Push Event)                   |  (Node.js)  |             (CodeFetched)
++--------^---------+             +-------------------+             +--------+---------+
+         |                                                                  |
+         | Pull                                                             | Consume
+         | Request                                                          v
++--------+---------+             +-------------------+             +--------+---------+
+|                  |  API POST   |                   |  Message    |                  |
+|    PR Service    |<------------+  AI Docs Service  |<------------|  Parsing Service |
+|    (Node.js)     |             |     (Python)      |             |     (Python)     |
++------------------+             +-------------------+             +------------------+
+                                                        (ContextReady)
 ```
 
-### Kullanılan Tasarım Desenleri (Design Patterns)
-* **Dependency Injection (Bağımlılık Enjeksiyonu):** Sınıflar arası sıkı sıkıya bağlılığı (tight coupling) önlemek ve test edilebilirliği artırmak için kullanılır.
-* **Repository Pattern (Depo Deseni):** Veri erişim mantığını iş mantığından soyutlamak için tercih edilmiştir.
-* **CQRS (Command Query Responsibility Segregation):** Yazma (Command) ve okuma (Query) operasyonlarını birbirinden ayırarak performans ve ölçeklenebilirlik sağlar.
-* **Factory Pattern:** Karmaşık nesne üretim süreçlerini standartlaştırmak amacıyla kullanılır.
+### Detaylı İş Akışı:
+1. **Tetiklenme (Push Event):** Kullanıcı GitHub deposuna kod gönderir. GitHub Webhook'u, `webhook_service` üzerindeki `/webhook` endpoint'ine bir POST isteği fırlatır.
+2. **Değişikliklerin Yakalanması:** 
+   - `webhook_service` gelen push olayındaki commit'leri ve değiştirilen dosyaları analiz eder.
+   - Eğer projede daha önce üretilmiş bir `autodoc.md` **yoksa** (`isInit` durumu), sistem projenin kök dizininden başlayarak dışlanan klasörler haricindeki en fazla 30 kaynak kod dosyasını tüm içeriğiyle çeker.
+   - Eğer `autodoc.md` **varsa**, sadece değişen dosyaların fark yamalarını (diff/patch) toplar.
+   - Toplanan bu veriler birleştirilerek RabbitMQ üzerindeki `CodeFetched` kuyruğuna gönderilir.
+3. **Ön İşleme (Parsing):** `code_parsing_service` kuyruktan mesajı alır, gerekli ön işlemleri tamamlar (genişletilebilir filtreler/düzenlemeler uygular) ve `ContextReady` kuyruğuna aktarır.
+4. **Yapay Zekâ ile Üretim:** `ai_docs_service` ilgili kuyruktan işlenmiş kod verisini teslim alır. Duruma uygun (İlk Kurulum veya Değişiklik Güncellemesi) hazırlanan prompt'u Google Gemini API modellerine iletir. Model yanıtı (Markdown içeriği) doğrulanarak `pr_service`'e iletilir.
+5. **PR Oluşturma:** `pr_service` gelen yeni Markdown içeriğini alır, hedef projeyi bot kullanıcısı adına çatallar (fork), değişiklikleri çatallanan depoya commit eder ve ana projeye (upstream) otomatik bir Pull Request açar.
 
 ---
 
-## 3. Dizin Yapısı ve Modüller
+## 2. Servis Detayları
 
-Projenin genel dosya ve klasör organizasyonu aşağıdaki gibidir:
+### 2.1. Webhook Service (Node.js)
+Giriş noktasıdır. GitHub üzerindeki anlık değişiklikleri yakalar ve bağlamsal veriyi hazırlar.
 
-```text
-├── src/                          # Kaynak kodların bulunduğu ana dizin
-│   ├── Domain/                   # İş kuralları ve temel iş nesneleri (Entities)
-│   │   ├── Entities/             # Veritabanı tablolarına karşılık gelen sınıflar
-│   │   ├── Exceptions/           # İş mantığına özel hata tanımlamaları
-│   │   └── ValueObjects/         # Değer nesneleri
-│   │
-│   ├── Application/              # Uygulama mantığı ve kullanım senaryoları (Use Cases)
-│   │   ├── Interfaces/           # Altyapı katmanı için arayüz (Interface) tanımları
-│   │   ├── DTOs/                 # Veri transfer nesneleri (Data Transfer Objects)
-│   │   └── Services/             # İş süreçlerini yöneten servis sınıfları
-│   │
-│   ├── Infrastructure/           # Dış dünya ile iletişim ve veri erişim katmanı
-│   │   ├── Persistence/          # Veritabanı bağlantısı, ORM yapılandırmaları ve göçler (Migrations)
-│   │   ├── Identity/             # Kullanıcı yönetimi ve güvenlik işlemleri
-│   │   └── Services/             # Dış API entegrasyonları, dosya depolama vb.
-│   │
-│   └── Presentation/             # Kullanıcı veya dış sistemlerle etkileşim katmanı
-│       ├── Controllers/          # HTTP isteklerini karşılayan ve yanıtlayan sınıflar
-│       ├── Middleware/           # İstek ve yanıt arasına giren ara yazılımlar (Hata yönetimi, Loglama)
-│       └── Program.cs / Startup  # Uygulama başlangıç yapılandırması ve DI kayıtları
-│
-├── tests/                        # Test senaryoları
-│   ├── UnitTests/                # Birim testleri
-│   └── IntegrationTests/         # Entegrasyon testleri
-│
-├── docs/                         # Ek dokümantasyonlar ve diyagramlar
-├── Dockerfile                    # Konteynerleştirme yapılandırması
-├── docker-compose.yml            # Yerel geliştirme ortamı servis tanımları
-├── README.md                     # Genel proje açıklaması
-└── autodoc.md                    # Bu doküman
-```
+* **Dosya:** `node/webhook_service/src/index.js`
+* **Port:** `3000` (veya `PORT` env)
+* **Önemli Yetenekler:**
+  - **Filtreleme:** Sadece `push` event'lerini işler.
+  - **Yamalama (Patching):** Commit listesindeki her bir dosyanın `patch` verilerini birleştirerek `filePatches` sözlüğü oluşturur.
+  - **İlk Kurulum Taraması (Init Scan):** `autodoc.md` bulunamadığı senaryolarda `node_modules`, `bin`, `obj`, `.git`, `dist`, `build` gibi klasörleri filtreleyerek belirlenen uzantılardaki (`.cs`, `.js`, `.py`, `.ts`, `.md`, vb.) kaynak kod dosyalarını bulur. Limit aşımını önlemek amacıyla en güncel 30 dosyayı tam metin olarak çeker.
+  - **RabbitMQ Entegrasyonu:** Hazırlanan bu veriyi `CodeFetched` kuyruğuna `durable` (kalıcı) olarak bırakır.
+
+### 2.2. Code Parsing Service (Python)
+Gelen ham verilerin temizlenmesi, normalize edilmesi ve işleme hazır hale getirilmesinden sorumlu ara katmandır.
+
+* **Dosya:** `python/code_parsing_service.py`
+* **İşlevi:** `CodeFetched` kuyruğundan mesajı okur. `preprocess_data` fonksiyonu aracılığıyla veriyi işler (bu aşamada veri yapısı korunur ancak gelecekte AST analizi, token küçültme vb. eklentilere uygundur). Mesajı `ContextReady` kuyruğuna iletir.
+
+### 2.3. AI Docs Service (Python)
+Yapay zekâ yeteneklerini yöneten akıllı karar servisidir.
+
+* **Dosya:** `python/ai_docs_service.py`
+* **İşlevi:** 
+  - Gelen mesajda `isInit` bayrağını denetler. True ise tüm kaynak kod dosyalarını içeren kapsamlı bir **"İlk Kez Dokümantasyon Oluşturma"** prompt'u hazırlar. False ise mevcut `autodoc.md` içeriği ile gelen diff/patch verilerini harmanlayarak bir **"Dokümantasyon Güncelleme"** prompt'u oluşturur.
+  - **Esnek Model Yönetimi:** Ağ gecikmeleri, kota sınırları veya API hatalarına karşı sistem sırasıyla şu modelleri dener:
+    1. `gemini-3.5-flash`
+    2. `gemini-3.0-flash`
+    3. `gemini-2.5-flash`
+    4. `gemini-3.1-flash-lite`
+    5. `gemini-2.5-flash-lite`
+    6. `gemma-4-31b`
+    7. `gemma-4-26b`
+  - **Yeniden Deneme Mekanizması (Retry with Backoff):** Her bir model için başarısızlık durumunda üstel gecikme ile 3 kez deneme yapar. Biri başarısız olursa bir sonraki modele otomatik geçer.
+  - Modelden gelen yanıtı temizledikten sonra `pr_service`'e POST isteği olarak gönderir.
+
+### 2.4. PR Service (Node.js)
+Üretilen dokümantasyonun güvenli bir şekilde ana projeye entegre edilmesini sağlayan kapıcı (gatekeeper) servisidir.
+
+* **Dosya:** `node/pr_service/src/index.js`
+* **Port:** `3001` (veya `PORT` env)
+* **Önemli Yetenekler:**
+  - **Çatallama (Forking):** Doğrudan ana projeye yazmak yerine güvenli tarafta kalmak adına hedef repoyu bot hesabı üzerine çatallar (`{repo}.AutoDoc.Fork`).
+  - **Senkronizasyon (Upstream Sync):** Çatallanan projenin güncelliğini yitirmemesi için upstream'den otomatik `mergeUpstream` tetikler.
+  - **Kod Bloğu Temizliği:** Gemini yanıtlarında oluşabilecek fazla Markdown blok işaretlerini (` ```markdown ` vb.) regex/metin temizleme yoluyla arındırır.
+  - **PR Yönetimi:** Değişiklikleri çatallanan repoda commit eder. Ardından ana deponun ana dalına (default branch) yönlendirilmiş bir Pull Request açar. Eğer halihazırda açık bir AutoDoc PR'ı varsa, yeni commit'leri doğrudan o PR'a pushlayarak PR kirliliğini önler.
+
+### 2.5. Orchestrator / Python Runner
+Python servislerinin tek bir process ağacında düzgün bir şekilde yönetilmesini ve eşzamanlı çalışmasını sağlar.
+
+* **Dosya:** `python/main.py`
+* **İşlevi:** `multiprocessing.Process` kullanarak `CodeParsingService` ve `AIDocsService` yapılarını asenkron olarak ayağa kaldırır. `SIGINT` (CTRL+C) sinyali yakalandığında tüm alt süreçleri (processes) güvenli bir şekilde sonlandırır.
 
 ---
 
-## 4. Bileşen Detayları ve Veri Akışı
+## 3. Veri Akış Modeli ve Kuyruk Yapısı
 
-### 4.1. İstek (Request) Ömrü ve Veri Akışı
-Sistemde bir HTTP isteğinin işlenme süreci şu adımlardan oluşur:
+Sistemde kullanılan RabbitMQ kuyrukları mesaj kayıplarını önlemek amacıyla `durable: true` (kalıcı) olarak tanımlanmıştır. `basic_qos(prefetch_count=1)` ayarı ile "Fair Dispatch" (Adil Dağıtım) uygulanarak yoğun zamanlarda işçilerin (workers) aşırı yüklenmesi engellenir.
 
-1. **İstek Kabulü:** İstemci (Client) tarafından gönderilen istek `Presentation` katmanındaki ilgili Controller'a ulaşır.
-2. **Güvenlik & Doğrulama:** İstek, Middleware katmanında JWT doğrulaması ve girdi validasyonundan (Validation) geçirilir.
-3. **İş Mantığına Aktarım:** Controller, gelen veriyi `DTO` formatında `Application` katmanındaki servis veya CQRS Handler'a iletir.
-4. **Veri Erişimi:** Servis, gerekli verileri almak veya kaydetmek için `Infrastructure` katmanındaki soyutlanmış `Repository` arayüzlerini çağırır.
-5. **İşlem ve Kayıt:** Veritabanı işlemleri Unit of Work deseniyle transaction altında gerçekleştirilir.
-6. **Yanıt Hazırlama:** İşlem sonucu Controller üzerinden standart bir JSON yanıt şablonu ile istemciye geri dönülür.
-
-### 4.2. Hata Yönetimi (Error Handling)
-Uygulama genelinde merkezi bir hata yönetim mekanizması (Global Exception Handling Middleware) bulunur. Kod içerisinde fırlatılan tüm istisnalar (Exceptions) bu middleware tarafından yakalanır, loglanır ve istemciye aşağıdaki gibi standart bir formatta sunulur:
-
+### Kuyruğa Gönderilen Mesaj Formatı (JSON):
 ```json
 {
-  "success": false,
-  "message": "İşlem sırasında bir hata oluştu.",
-  "errors": [
-    "İstenen kaynak bulunamadı."
+  "repoUrl": "https://github.com/user/demo-repo",
+  "repoFullName": "user/demo-repo",
+  "changes": [
+    {
+      "filename": "src/main.js",
+      "patch": "@@ -1,5 +1,8 @@\n+const logger = require('./logger');..."
+    }
   ],
-  "statusCode": 404
+  "existingDoc": "# Eski Doküman Başlığı\nEski içerik detayları...",
+  "isInit": false,
+  "initFiles": [],
+  "timestamp": "2025-10-27T14:20:00.000Z"
 }
 ```
 
 ---
 
-## 5. Kurulum ve Yapılandırma
+## 4. Kullanılan Teknolojiler
 
-### Gereksinimler
-Projenin yerel ortamda çalıştırılabilmesi için aşağıdaki yazılımların kurulu olması gerekmektedir:
-* Çalışma Zamanı Ortamı (Örn: .NET SDK, Node.js, Python veya Java JDK - ilgili teknolojiye göre)
-* Docker ve Docker Compose
-* Veritabanı Sunucusu (Örn: PostgreSQL, MSSQL, MongoDB)
-
-### Yerel Geliştirme Ortamı Kurulumu
-
-1. **Depoyu Klonlayın:**
-   ```bash
-   git clone <proje-repo-adresi>
-   cd <proje-klasor-adi>
-   ```
-
-2. **Çevre Değişkenlerini Yapılandırın:**
-   Kök dizinde yer alan `.env.example` dosyasını kopyalayarak `.env` adında yeni bir dosya oluşturun ve gerekli bağlantı bilgilerini tanımlayın:
-   ```env
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=project_db
-   DB_USER=postgres
-   DB_PASSWORD=secret_password
-   JWT_SECRET=super_secret_key_minimum_32_characters
-   ```
-
-3. **Veritabanını ve Servisleri Başlatın (Docker):**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Bağımlılıkları Yükleyin ve Uygulamayı Başlatın:**
-   ```bash
-   # Proje teknolojisine uygun bağımlılık yükleme komutu çalıştırılmalıdır.
-   # Örnek:
-   npm install      # Node.js için
-   dotnet restore   # .NET için
-   pip install -r requirements.txt # Python için
-   
-   # Uygulamayı çalıştırma:
-   npm run start:dev
-   # veya
-   dotnet run --project src/Presentation
-   ```
+* **Runtime:** Node.js (v18+), Python (v3.10+)
+* **Mesajlaşma:** RabbitMQ (AMQP)
+* **İletişim / API İstemcileri:** 
+  - `@octokit/rest` (GitHub REST API istemcisi)
+  - `google-genai` (Google Gemini API istemcisi)
+  - `pika` (Python RabbitMQ sürücüsü)
+  - `express` (Node.js HTTP sunucusu)
+  - `requests` (Python HTTP kütüphanesi)
+* **Tasarım Kalıpları:** Event-Driven Architecture, Microservices, Worker-Queue Pattern, Fallback & Retry Pattern
 
 ---
 
-## 6. API ve Kullanım Örnekleri
+## 5. Kurulum ve Çalıştırma
 
-Sistem ayağa kalktıktan sonra API uç noktalarına genellikle tarayıcı üzerinden `/swagger` veya `/docs` adreslerinden (Swagger UI / Redoc) erişilebilir.
+### 5.1. Gereksinimler
+* Çalışır durumda bir RabbitMQ Sunucusu (`amqp://guest:guest@localhost:5672`)
+* Yetkili bir GitHub Kişisel Erişim Token'ı (Personal Access Token - PAT). Çatallama ve PR açma yetkilerine sahip olmalıdır.
+* Google Gemini API Anahtarı.
 
-### Örnek API İstek ve Yanıtı
+### 5.2. Ortam Değişkenleri (.env)
 
-#### `POST /api/v1/products` - Yeni Ürün Ekleme
-
-* **İstek Başlığı (Headers):**
-  ```http
-  Content-Type: application/json
-  Authorization: Bearer <token_degeri>
-  ```
-
-* **İstek Gövdesi (Body):**
-  ```json
-  {
-    "name": "Kablosuz Kulaklık",
-    "sku": "KBL-KLK-001",
-    "price": 1250.00,
-    "stock": 100
-  }
-  ```
-
-* **Başarılı Yanıt (Response - 201 Created):**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "id": "e3b0c442-98fc-11eb-a8b3-0242ac130003",
-      "name": "Kablosuz Kulaklık",
-      "sku": "KBL-KLK-001",
-      "price": 1250.00,
-      "stock": 100,
-      "createdAt": "2023-10-27T14:32:01Z"
-    },
-    "message": "Ürün başarıyla oluşturuldu."
-  }
-  ```
-
----
-
-## 7. Test ve Kalite Güvencesi
-
-Projede kod kalitesini ve kararlılığını korumak amacıyla otomatik test süreçleri kurgulanmıştır.
-
-### Testleri Çalıştırma
-
-* **Birim (Unit) Testleri:** İş kurallarının doğruluğunu test etmek için mocks/stubs kullanarak çalıştırılır.
-  ```bash
-  npm run test:unit       # Node.js
-  dotnet test --filter Category=Unit # .NET
-  ```
-
-* **Entegrasyon (Integration) Testleri:** Veritabanı ve dış API entegrasyonlarının doğruluğunu test etmek için gerçek veya izole (testcontainers) servislerle çalıştırılır.
-  ```bash
-  npm run test:integration
-  ```
-
-### Kod Kalitesi Standartları
-* **Linter & Formatters:** Projede kod standartlarını korumak için ESLint, Prettier, StyleCop veya Black gibi araçlar entegre edilmiştir. Taahhüt (commit) öncesinde bu kuralların kontrolü otomatik olarak yapılır.
-
----
-
-## 8. Dağıtım (Deployment) ve CI/CD
-
-Proje, modern bulut platformlarına ve Kubernetes ortamlarına kolayca dağıtılabilecek şekilde tamamen konteynerleştirilmiştir.
-
-### CI/CD Pipeline İş Akışı
-
-```
-[Local Code Commit] 
-       │
-       ▼
-[GitHub / GitLab CI] ──► Linter & Statik Kod Analizi (SonarQube)
-       │
-       ▼
-[Run Tests] ──► Unit & Integration Testlerinin Koşturulması
-       │
-       ▼
-[Build Docker Image] ──► Dockerfile ile İmaj Oluşturma
-       │
-       ▼
-[Push to Registry] ──► Docker Hub / AWS ECR / GitLab Registry
-       │
-       ▼
-[Deploy to Target] ──► Kubernetes / AWS ECS / VPS (Webhooks)
+#### Node Servisleri (`node/webhook_service/.env` ve `node/pr_service/.env`)
+```env
+PORT=3000 # webhook_service için 3000, pr_service için 3001
+GITHUB_TOKEN=ghp_YourGitHubPersonalAccessToken
+RABBITMQ_URL=amqp://guest:guest@localhost:5672
 ```
 
-### Docker İmajı Oluşturma
-
-Projenin üretim (production) ortamı için Docker imajı oluşturmak için aşağıdaki komut kullanılır:
-
-```bash
-docker build -t core-api-platform:latest .
+#### Python Servisleri (`python/.env` veya Sistem Ortam Değişkenleri)
+```env
+GEMINI_API_KEY=AIzaSyYourGeminiApiKey
+RABBITMQ_HOST=localhost
+CODE_FETCHED_QUEUE=CodeFetched
+CONTEXT_READY_QUEUE=ContextReady
+API_ENDPOINT=http://localhost:3001/publish
 ```
+
+### 5.3. Servislerin Başlatılması
+
+1. **RabbitMQ'yu Başlatın:**
+   ```bash
+   docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+   ```
+
+2. **Webhook Service Çalıştırın:**
+   ```bash
+   cd node/webhook_service
+   npm install
+   npm start
+   ```
+
+3. **PR Service Çalıştırın:**
+   ```bash
+   cd node/pr_service
+   npm install
+   npm start
+   ```
+
+4. **Python Servislerini Başlatın:**
+   ```bash
+   cd python
+   pip install -r requirements.txt # pika, requests, google-genai paketleri yüklenmelidir
+   python main.py
+   ```
