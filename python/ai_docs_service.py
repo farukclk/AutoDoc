@@ -43,23 +43,39 @@ class AIDocsService:
     def get_gemini_response(self, prompt):
         """Calls Gemini API to generate content based on the prompt."""
         import time
+        models_to_try = [
+            'gemini-3.5-flash',
+            'gemini-3.0-flash',
+            'gemini-2.5-flash',
+            'gemini-3.1-flash-lite',
+            'gemini-2.5-flash-lite',
+            'gemma-4-31b',
+            'gemma-4-26b'
+        ]
         max_retries = 3
-        delay = 5
 
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
-                return response.text
-            except Exception as e:
-                print(f" [!] Error calling Gemini API (Attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    raise e
+        last_exception = None
+
+        for model in models_to_try:
+            print(f" [x] Trying model: {model}")
+            delay = 5
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=prompt
+                    )
+                    return response.text
+                except Exception as e:
+                    print(f" [!] {model} Error (Attempt {attempt + 1}/{max_retries}): {e}")
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
+                        delay *= 2
+            
+            print(f" [!] Model {model} failed after {max_retries} attempts. Switching to next model...")
+
+        raise Exception(f"Tüm modeller denendi ve hepsi hata verdi! Son Hata: {str(last_exception)}")
 
     def send_to_api(self, payload):
         """Gelen veriyi belirtilen endpoint'e POST eder."""
@@ -81,20 +97,43 @@ class AIDocsService:
             repo_full_name = data_dict.get("repoFullName", "")
             changes = data_dict.get("changes", [])
             existing_doc = data_dict.get("existingDoc", "")
+            is_init = data_dict.get("isInit", False)
+            init_files = data_dict.get("initFiles", [])
             
-            if not changes:
+            if not changes and not is_init:
                 print(" [!] No changes found in message.")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
 
-            # Prepare prompt with all diffs
-            diff_text = ""
-            for change in changes:
-                filename = change.get("filename", "Unknown")
-                patch = change.get("patch", "")
-                diff_text += f"\n--- {filename} ---\n{patch}\n"
-            
-            prompt = f"""Sen uzman bir teknik yazar ve yazılım geliştiricisin.
+            if is_init:
+                # Initialization branch: parse all provided files
+                files_text = ""
+                for file_obj in init_files:
+                    filename = file_obj.get("filename", "Unknown")
+                    content = file_obj.get("content", "")
+                    files_text += f"\n--- {filename} ---\n{content}\n"
+                    
+                prompt = f"""Sen uzman bir teknik yazar ve yazılım geliştiricisin.
+Bu proje için İLK DEFA bir dokümantasyon (autodoc.md) oluşturuyorsun.
+Aşağıda projenin tüm önemli kod dosyalarının tam içerikleri bulunmaktadır.
+Lütfen bu kodları inceleyerek projenin amacını, mimarisini ve nasıl çalıştığını anlatan kapsamlı bir Markdown dokümantasyonu oluştur.
+
+Lütfen sadece Markdown formatında dosyanın TAM içeriğini döndür. 
+Başında, sonunda veya aralarında hiçbir açıklama, yorum veya selamlaşma BULUNMAMALIDIR. Sadece ve sadece güncel Markdown içeriği olmalıdır.
+
+Proje Dosyaları:
+{files_text}
+"""
+                print(" [x] Generating INITIAL documentation from full source...")
+            else:
+                # Update branch: parse diffs
+                diff_text = ""
+                for change in changes:
+                    filename = change.get("filename", "Unknown")
+                    patch = change.get("patch", "")
+                    diff_text += f"\n--- {filename} ---\n{patch}\n"
+                
+                prompt = f"""Sen uzman bir teknik yazar ve yazılım geliştiricisin.
 Görevin, projenin mevcut dokümantasyonunu (autodoc.md) gelen kod değişikliklerine (diff/patch) göre güncellemektir.
 Lütfen sadece Markdown formatında güncellenmiş dosyanın TAM içeriğini döndür. 
 Başında, sonunda veya aralarında hiçbir açıklama, yorum, selamlaşma veya "Şunu değiştirdim" gibi metinler BULUNMAMALIDIR. Sadece ve sadece güncel Markdown içeriği olmalıdır.
@@ -105,6 +144,7 @@ Mevcut Dokümantasyon:
 Değişiklikler (Diffs):
 {diff_text}
 """
+                print(" [x] Updating documentation from diffs...")
 
             # Call Gemini API
             print(" [x] Processing with Gemini API...")

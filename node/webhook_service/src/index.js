@@ -94,11 +94,67 @@ app.post('/webhook', async (req, res) => {
             }
         }
 
+        let isInit = false;
+        let initFiles = [];
+        if (!existingDoc) {
+            isInit = true;
+            try {
+                // Fetch the repository tree
+                const treeRes = await octokit.rest.git.getTree({
+                    owner,
+                    repo,
+                    tree_sha: payload.after || payload.repository.default_branch,
+                    recursive: "1"
+                });
+                
+                if (treeRes.data && treeRes.data.tree) {
+                    const excludedDirs = ['node_modules', 'bin', 'obj', '.git', 'dist', 'build', 'out', 'vendor'];
+                    const allowedExts = ['.cs', '.js', '.py', '.ts', '.md', '.java', '.go', '.rb', '.php', '.c', '.cpp', '.h', '.hpp'];
+                    
+                    const codeFiles = treeRes.data.tree.filter(item => {
+                        if (item.type !== 'blob') return false;
+                        const pathParts = item.path.split('/');
+                        // Check if any part of the path is in excludedDirs
+                        if (pathParts.some(part => excludedDirs.includes(part))) return false;
+                        
+                        const ext = item.path.substring(item.path.lastIndexOf('.')).toLowerCase();
+                        if (!allowedExts.includes(ext)) return false;
+                        
+                        return true;
+                    });
+                    
+                    // Limit to top 30 files to avoid rate limits / token limits
+                    const filesToFetch = codeFiles.slice(0, 30);
+                    
+                    for (const file of filesToFetch) {
+                        try {
+                            const fileRes = await octokit.rest.repos.getContent({
+                                owner,
+                                repo,
+                                path: file.path,
+                                ref: payload.after || payload.repository.default_branch
+                            });
+                            if (fileRes.data.type === 'file' && fileRes.data.content) {
+                                const content = Buffer.from(fileRes.data.content, 'base64').toString('utf8');
+                                initFiles.push({ filename: file.path, content });
+                            }
+                        } catch (err) {
+                            console.error(`[Webhook Service] Failed to fetch content for ${file.path}:`, err.message);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[Webhook Service] Error fetching tree for init:', err.message);
+            }
+        }
+
         const message = {
             repoUrl: payload.repository.html_url,
             repoFullName: repoFullName,
             changes: changesList,
             existingDoc: existingDoc,
+            isInit: isInit,
+            initFiles: initFiles,
             timestamp: new Date().toISOString()
         };
 
