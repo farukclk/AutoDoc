@@ -18,8 +18,20 @@ class AIDocsService:
         self.channel = None
 
     def setup_rabbitmq(self):
-        # Connect to RabbitMQ
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+        import time
+        # Connect to RabbitMQ with retry
+        retries = 10
+        while retries > 0:
+            try:
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+                break
+            except pika.exceptions.AMQPConnectionError:
+                print(f" [!] RabbitMQ not ready, retrying in 5 seconds... ({retries} retries left)")
+                time.sleep(5)
+                retries -= 1
+        if not self.connection:
+            raise Exception("Could not connect to RabbitMQ")
+            
         self.channel = self.connection.channel()
 
         # Declare the input queue (durable=True survives RabbitMQ restarts)
@@ -30,39 +42,81 @@ class AIDocsService:
 
     def get_gemini_response(self, prompt):
         """Calls Gemini API to generate content based on the prompt."""
-        try:
-            response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            print(f"Error calling Gemini API: {e}")
-            return f"Error: {str(e)}"
+        import time
+        max_retries = 3
+        delay = 5
 
-    def send_to_api(self, data):
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt
+                )
+                return response.text
+            except Exception as e:
+                print(f" [!] Error calling Gemini API (Attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2
+                else:
+                    raise e
+
+    def send_to_api(self, payload):
         """Gelen veriyi belirtilen endpoint'e POST eder."""
         try:
             headers = {'Content-Type': 'application/json'}
-            payload = {"data": data}
             response = requests.post(self.api_endpoint, json=payload, headers=headers)
             print(f" [x] API POST Request Status Code: {response.status_code}")
         except Exception as e:
             print(f" [!] Hata: API'ye POST edilirken bir hata oluştu: {e}")
 
     def callback(self, ch, method, properties, body):
+        import json
         try:
             # Decode the message
             message = body.decode('utf-8')
-            print(f" [x] Received request from '{self.input_queue}': {message}")
+            print(f" [x] Received request from '{self.input_queue}'")
             
+            data_dict = json.loads(message)
+            repo_full_name = data_dict.get("repoFullName", "")
+            changes = data_dict.get("changes", [])
+            existing_doc = data_dict.get("existingDoc", "")
+            
+            if not changes:
+                print(" [!] No changes found in message.")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            # Prepare prompt with all diffs
+            diff_text = ""
+            for change in changes:
+                filename = change.get("filename", "Unknown")
+                patch = change.get("patch", "")
+                diff_text += f"\n--- {filename} ---\n{patch}\n"
+            
+            prompt = f"""Sen uzman bir teknik yazar ve yazılım geliştiricisin.
+Görevin, projenin mevcut dokümantasyonunu (autodoc.md) gelen kod değişikliklerine (diff/patch) göre güncellemektir.
+Lütfen sadece Markdown formatında güncellenmiş dosyanın TAM içeriğini döndür. 
+Başında, sonunda veya aralarında hiçbir açıklama, yorum, selamlaşma veya "Şunu değiştirdim" gibi metinler BULUNMAMALIDIR. Sadece ve sadece güncel Markdown içeriği olmalıdır.
+
+Mevcut Dokümantasyon:
+{existing_doc if existing_doc else "Henüz bir dokümantasyon oluşturulmamış."}
+
+Değişiklikler (Diffs):
+{diff_text}
+"""
+
             # Call Gemini API
             print(" [x] Processing with Gemini API...")
-            gemini_response = self.get_gemini_response(message)
+            gemini_response = self.get_gemini_response(prompt)
             
             # Post the response to the specified API
             print(f" [x] Sending Gemini response to {self.api_endpoint}...")
-            self.send_to_api(gemini_response)
+            payload = {
+                "repoFullName": repo_full_name,
+                "markdownContent": gemini_response
+            }
+            self.send_to_api(payload)
             
             # Acknowledge the message so RabbitMQ knows it's processed
             ch.basic_ack(delivery_tag=method.delivery_tag)

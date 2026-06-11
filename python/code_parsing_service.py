@@ -12,8 +12,20 @@ class CodeParsingService:
         self.channel = None
 
     def setup_rabbitmq(self):
-        # Connect to RabbitMQ
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+        import time
+        # Connect to RabbitMQ with retry
+        retries = 10
+        while retries > 0:
+            try:
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbitmq_host))
+                break
+            except pika.exceptions.AMQPConnectionError:
+                print(f" [!] RabbitMQ not ready, retrying in 5 seconds... ({retries} retries left)")
+                time.sleep(5)
+                retries -= 1
+        if not self.connection:
+            raise Exception("Could not connect to RabbitMQ")
+            
         self.channel = self.connection.channel()
 
         # Declare the queues (durable=True survives RabbitMQ restarts)

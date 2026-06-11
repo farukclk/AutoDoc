@@ -23,39 +23,65 @@ app.post('/publish', async (req, res) => {
         const [owner, repo] = repoFullName.split('/');
         const docFileName = 'autodoc.md';
 
-        // 1. Get the default branch (usually main or master)
-        const repoInfo = await octokit.rest.repos.get({
-            owner,
-            repo
-        });
-        const defaultBranch = repoInfo.data.default_branch;
+        // 1. Get authenticated user (bot)
+        const authUser = await octokit.rest.users.getAuthenticated();
+        const botUser = authUser.data.login;
 
-        // 2. Get the commit SHA of the default branch
-        const refInfo = await octokit.rest.git.getRef({
-            owner,
-            repo,
-            ref: `heads/${defaultBranch}`
-        });
-        const baseSha = refInfo.data.object.sha;
+        let targetOwner = botUser;
+        let targetRepo = `${repo}.AutoDoc.Fork`;
+        let targetBranch = 'main';
 
-        // 3. Create a new branch
-        const newBranchName = `autodoc-update-${Date.now()}`;
-        await octokit.rest.git.createRef({
-            owner,
-            repo,
-            ref: `refs/heads/${newBranchName}`,
-            sha: baseSha
-        });
+        // 2. Fork the repository
+        try {
+            const forkRes = await octokit.rest.repos.createFork({
+                owner,
+                repo,
+                name: targetRepo,
+                default_branch_only: true
+            });
+            targetBranch = forkRes.data.default_branch || 'main';
+        } catch (e) {
+            console.error('[PR Service] Error creating fork:', e.message);
+            return res.status(500).send('Error creating fork');
+        }
 
-        // 4. Check if autodoc.md already exists to get its file SHA (needed for updating)
+        // Wait for fork to be ready
+        let isReady = false;
+        for (let i = 0; i < 15; i++) {
+            try {
+                await octokit.rest.repos.get({ owner: targetOwner, repo: targetRepo });
+                isReady = true;
+                break;
+            } catch (e) {
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        if (!isReady) {
+            return res.status(500).send('Fork was not ready in time.');
+        }
+
+        // 3. Sync fork with upstream
+        try {
+            await octokit.rest.repos.mergeUpstream({
+                owner: targetOwner,
+                repo: targetRepo,
+                branch: targetBranch
+            });
+            console.log('[PR Service] Synced fork with upstream.');
+        } catch (e) {
+            console.log('[PR Service] Sync upstream info:', e.message);
+        }
+
+        // 4. Check if autodoc.md already exists
         let fileSha = null;
         let existingContent = '';
         try {
             const fileInfo = await octokit.rest.repos.getContent({
-                owner,
-                repo,
+                owner: targetOwner,
+                repo: targetRepo,
                 path: docFileName,
-                ref: newBranchName
+                ref: targetBranch
             });
             fileSha = fileInfo.data.sha;
             existingContent = Buffer.from(fileInfo.data.content, 'base64').toString('utf8');
@@ -63,42 +89,58 @@ app.post('/publish', async (req, res) => {
             if (error.status !== 404) {
                 throw error;
             }
-            // File does not exist, which is fine
         }
 
-        // 5. Create or Update the file in the new branch
-        const newContent = existingContent
-            ? `${existingContent}\n\n---\n\n${markdownContent}`
-            : markdownContent;
+        // 5. Create or Update the file
+        // Clean markdown content from potential ```markdown blocks if Gemini added them
+        let finalContent = markdownContent.trim();
+        if (finalContent.startsWith('```markdown')) {
+            finalContent = finalContent.substring(11).replace(/```$/, '').trim();
+        } else if (finalContent.startsWith('```')) {
+            finalContent = finalContent.substring(3).replace(/```$/, '').trim();
+        }
+
+        const newContent = finalContent;
 
         await octokit.rest.repos.createOrUpdateFileContents({
-            owner,
-            repo,
+            owner: targetOwner,
+            repo: targetRepo,
             path: docFileName,
             message: 'docs: Update autodoc.md with latest AI generated docs',
             content: Buffer.from(newContent).toString('base64'),
-            branch: newBranchName,
-            sha: fileSha || undefined // sha is required if updating an existing file
+            branch: targetBranch,
+            sha: fileSha || undefined
         });
 
-        // 6. Create a Pull Request
-        const prResponse = await octokit.rest.pulls.create({
-            owner,
-            repo,
-            title: 'docs: AutoDoc AI Documentation Update',
-            head: newBranchName,
-            base: defaultBranch,
-            body: 'This is an automated pull request created by AutoDoc pipeline to update the documentation.'
-        });
+        // 6. Create a Pull Request (or update existing)
+        try {
+            const upstreamInfo = await octokit.rest.repos.get({ owner, repo });
+            const upstreamDefaultBranch = upstreamInfo.data.default_branch;
 
-        console.log(`[PR Service] Successfully opened PR: ${prResponse.data.html_url}`);
-        res.status(200).json({
-            message: 'Pull Request created successfully',
-            prUrl: prResponse.data.html_url
-        });
+            const prResponse = await octokit.rest.pulls.create({
+                owner,
+                repo,
+                title: 'docs: AutoDoc AI Documentation Update',
+                head: `${targetOwner}:${targetBranch}`,
+                base: upstreamDefaultBranch,
+                body: 'This is an automated pull request created by AutoDoc pipeline to update the documentation. Any further pushes will update this PR automatically.'
+            });
 
+            console.log(`[PR Service] Successfully opened PR: ${prResponse.data.html_url}`);
+            res.status(200).json({
+                message: 'Pull Request created successfully',
+                prUrl: prResponse.data.html_url
+            });
+        } catch (error) {
+            if (error.message.includes('A pull request already exists')) {
+                console.log('[PR Service] PR already exists. It has been updated automatically by the branch push.');
+                res.status(200).json({ message: 'PR already exists and was updated.' });
+            } else {
+                throw error;
+            }
+        }
     } catch (error) {
-        console.error('[PR Service] Error creating PR:', error.message);
+        console.error('[PR Service] Error handling webhook:', error.message);
         res.status(500).send('Internal Server Error');
     }
 });
